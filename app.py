@@ -4,24 +4,62 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
+import logging
+import traceback
 
 app = Flask(__name__)
 CORS(app)
 
-# 讀取 Excel 文件
+# 設置日誌
+logging.basicConfig(level=logging.DEBUG)
+
+# 讀取上市和上櫃公司資料
 try:
-    broker_df = pd.read_excel('brokers.xlsx')
+    listed_companies = pd.read_csv('上市公司.csv', encoding='utf-8')
+    otc_companies = pd.read_csv('上櫃公司.csv', encoding='utf-8')
+    
+    # 添加一個新列來標識公司類型
+    listed_companies['上市櫃'] = '上市'
+    otc_companies['上市櫃'] = '上櫃'
+    
+    all_companies = pd.concat([listed_companies, otc_companies])
+    all_companies['公司代號'] = all_companies['公司代號'].astype(str).str.zfill(4)
+    logging.info(f"成功讀取公司資料，共 {len(all_companies)} 筆")
+    logging.info(f"列名: {all_companies.columns.tolist()}")
 except Exception as e:
-    print(f"無法讀取 Excel 文件: {e}")
-    broker_df = pd.DataFrame()
+    logging.error(f"讀取公司資料時發生錯誤: {str(e)}")
+    logging.error(traceback.format_exc())
+    all_companies = pd.DataFrame()
 
 @app.route('/')
 def home():
     return jsonify({"message": "歡迎使用股票資料API"})
 
-@app.route('/api/chip_data/<stock_code>')
-def get_chip_data(stock_code):
+@app.route('/api/chip_data/<stock_input>')
+def get_chip_data(stock_input):
     try:
+        logging.info(f"接收到查詢請求：{stock_input}")
+        
+        # 查找股票代碼和名稱
+        if stock_input.isdigit():
+            stock_info = all_companies[all_companies['公司代號'] == stock_input.zfill(4)]
+        else:
+            stock_info = all_companies[all_companies['公司名稱'].str.contains(stock_input)]
+        
+        if stock_info.empty:
+            logging.warning(f"找不到匹配的股票: {stock_input}")
+            return jsonify({'error': f'找不到匹配的股票: {stock_input}'}), 404
+        
+        stock_code = stock_info['公司代號'].iloc[0]
+        stock_name = stock_info['公司名稱'].iloc[0]
+        stock_short_name = stock_info['公司簡稱'].iloc[0]
+        industry = stock_info['產業類別'].iloc[0] if '產業類別' in stock_info.columns else '未知'
+        address = stock_info['住址'].iloc[0]
+        listing_type = stock_info['上市櫃'].iloc[0]
+        stock_agent = stock_info['股票過戶機構'].iloc[0]
+        
+        logging.info(f"找到匹配的股票: {stock_name} ({stock_code}) - {listing_type}")
+        
         start_date = request.args.get('start_date', '')
         end_date = request.args.get('end_date', '')
 
@@ -29,6 +67,8 @@ def get_chip_data(stock_code):
             url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco.djhtm?a={stock_code}&e={start_date}&f={end_date}"
         else:
             url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco_{stock_code}.djhtm"
+        
+        logging.info(f"請求 URL：{url}")
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
@@ -42,6 +82,7 @@ def get_chip_data(stock_code):
         table = soup.find('table', {'class': 't01'})
         
         if not table:
+            logging.warning("無法找到數據表格")
             return jsonify({'error': '無法找到數據表格'}), 404
         
         rows = table.find_all('tr')[5:-3]
@@ -73,6 +114,12 @@ def get_chip_data(stock_code):
         
         result = {
             '股票代號': stock_code,
+            '股票名稱': stock_name,
+            '股票簡稱': stock_short_name,
+            '產業別': industry,
+            '公司地址': address,
+            '上市櫃': listing_type,
+            '股票過戶機構': stock_agent,
             '日期': date,
             '開始日期': start_date,
             '結束日期': end_date,
@@ -80,88 +127,10 @@ def get_chip_data(stock_code):
             '賣超分點': sell_super
         }
         
+        logging.info("成功獲取並解析數據")
         return jsonify(result)
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/stock_data/<stock_code>')
-def get_stock_data(stock_code):
-    try:
-        url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zca/zca_{stock_code}.djhtm"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        response = requests.get(url, headers=headers)
-        response.encoding = 'big5'
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        data = {
-            '股票代號': stock_code,
-            '日期': soup.find('span', {'id': 'ctl00_MainContent_uctlZca_LbDATETIME'}).text.strip(),
-            '開盤價': soup.find('span', {'id': 'ctl00_MainContent_uctlZca_LbOPEN'}).text.strip(),
-            '收盤價': soup.find('span', {'id': 'ctl00_MainContent_uctlZca_LbCLOSE'}).text.strip(),
-            '最高價': soup.find('span', {'id': 'ctl00_MainContent_uctlZca_LbHIGH'}).text.strip(),
-            '最低價': soup.find('span', {'id': 'ctl00_MainContent_uctlZca_LbLOW'}).text.strip(),
-            '成交量': soup.find('span', {'id': 'ctl00_MainContent_uctlZca_LbVOLUME'}).text.strip()
-        }
-        
-        return jsonify(data)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/broker_history/<stock_code>/<broker_id>')
-def get_broker_history(stock_code, broker_id):
-    try:
-        # 從 Excel 文件中獲取券商資訊
-        broker_info = broker_df[broker_df['證券商代號'] == broker_id].iloc[0]
-        broker_name = broker_info['證券商名稱']
-        broker_address = broker_info['地址']
-
-        # 設置日期範圍（例如：過去一年）
-        end_date = request.args.get('end_date', datetime.now().strftime('%Y-%m-%d'))
-        start_date = request.args.get('start_date', (datetime.now() - pd.DateOffset(years=1)).strftime('%Y-%m-%d'))
-
-        url = f"https://fubon-ebrokerdj.fbs.com.tw/z/zc/zco/zco0/zco0.djhtm?A={stock_code}&BHID={broker_id}&b={broker_id}&C=0&D={start_date}&E={end_date}&ver=V3"
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-        
-        response = requests.get(url, headers=headers)
-        response.encoding = 'big5'
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        table = soup.find('table', {'id': 'oMainTable'})
-        
-        if not table:
-            return jsonify({'error': '無法找到數據表格'}), 404
-        
-        rows = table.find_all('tr')[1:]  # 跳過表頭
-        
-        history_data = []
-        for row in rows:
-            cols = row.find_all('td')
-            if len(cols) >= 5:
-                data = {
-                    '日期': cols[0].text.strip(),
-                    '買進': cols[1].text.strip(),
-                    '賣出': cols[2].text.strip(),
-                    '買賣總額': cols[3].text.strip(),
-                    '買賣超': cols[4].text.strip()
-                }
-                history_data.append(data)
-        
-        result = {
-            '股票代號': stock_code,
-            '券商代號': broker_id,
-            '券商名稱': broker_name,
-            '券商地址': broker_address,
-            '歷史資料': history_data
-        }
-        
-        return jsonify(result)
-    except Exception as e:
+        logging.error(f"處理請求時發生錯誤: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

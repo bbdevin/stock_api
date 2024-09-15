@@ -3,9 +3,10 @@ from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import traceback
+import yfinance as yf
 
 app = Flask(__name__)
 CORS(app)
@@ -82,8 +83,8 @@ def get_chip_data(stock_input):
         table = soup.find('table', {'class': 't01'})
         
         if not table:
-            logging.warning("無法找到數據表格")
-            return jsonify({'error': '無法找到數據表格'}), 404
+            logging.warning("無法找到資料表格")
+            return jsonify({'error': '無法找到資料表格'}), 404
         
         rows = table.find_all('tr')[5:-3]
         
@@ -127,11 +128,46 @@ def get_chip_data(stock_input):
             '賣超分點': sell_super
         }
         
-        logging.info("成功獲取並解析數據")
+        logging.info("成功獲取並解析資料")
         return jsonify(result)
     except Exception as e:
         logging.error(f"處理請求時發生錯誤: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/stock_history/<stock_code>')
+def get_stock_history(stock_code):
+    try:
+        logging.info(f"開始獲取股票 {stock_code} 的歷史資料")
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=365)  # 獲取一年的資料
+
+        # 為台灣股票添加 .TW 後綴
+        ticker = yf.Ticker(f"{stock_code}.TW")
+        history = ticker.history(start=start_date, end=end_date)
+
+        if history.empty:
+            logging.warning(f"股票 {stock_code} 沒有返回任何歷史資料")
+            return jsonify({'error': '沒有找到該股票的歷史資料'}), 404
+
+        data = []
+        for date, row in history.iterrows():
+            data.append({
+                'date': date.strftime('%Y-%m-%d'),
+                'open': float(row['Open']),
+                'high': float(row['High']),
+                'low': float(row['Low']),
+                'close': float(row['Close']),
+                'volume': int(row['Volume'])
+            })
+
+        logging.info(f"成功獲取並處理 {stock_code} 的歷史資料，共 {len(data)} 條記錄")
+        return jsonify(data)
+    except Exception as e:
+        logging.error(f"獲取股票 {stock_code} 歷史資料時發生錯誤: {str(e)}", exc_info=True)
+        return jsonify({'error': f"獲取股票歷史資料時發生錯誤: {str(e)}"}), 500
+
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
+
+# 在文件底部添加以下代碼以安裝所需的庫
+# pip install yfinance

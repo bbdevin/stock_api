@@ -139,7 +139,7 @@ def get_stock_history(stock_code):
     try:
         logging.info(f"開始獲取股票 {stock_code} 的歷史資料")
         end_date = datetime.now()
-        start_date = end_date - timedelta(days=365)  # 獲取一年的資料
+        start_date = end_date - timedelta(days=365 * 10)  # 獲取10年的資料
 
         # 為台灣股票添加 .TW 後綴
         ticker = yf.Ticker(f"{stock_code}.TW")

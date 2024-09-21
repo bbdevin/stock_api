@@ -9,9 +9,10 @@ import traceback
 import yfinance as yf
 import json
 import os
+import sys
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, resources={r"/*": {"origins": ["http://localhost:3000", "https://stock.techtrever.site"]}})
 
 # 設置日誌
 logging.basicConfig(level=logging.DEBUG)
@@ -65,7 +66,7 @@ def parse_broker_data(html_content):
 def home():
     return jsonify({"message": "歡迎使用股票資料API"})
 
-@app.route('/api/chip_data/<stock_input>')
+@app.route('/chip_data/<stock_input>')
 def get_chip_data(stock_input):
     try:
         logging.info(f"接收到查詢請求：{stock_input}")
@@ -163,7 +164,7 @@ def get_chip_data(stock_input):
         logging.error(f"處理請求時發生錯誤: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/stock_history/<stock_code>')
+@app.route('/stock_history/<stock_code>')
 def get_stock_history(stock_code):
     try:
         logging.info(f"開始獲取股票 {stock_code} 的歷史資料")
@@ -203,7 +204,8 @@ def get_stock_history(stock_code):
     except Exception as e:
         logging.error(f"獲取股票 {stock_code} 歷史資料時發生錯誤: {str(e)}", exc_info=True)
         return jsonify({'error': f"獲取股票歷史資料時發生錯誤: {str(e)}"}), 500
-@app.route('/api/broker_data', methods=['GET'])
+
+@app.route('/broker_data', methods=['GET'])
 def get_broker_data():
     stock_id = request.args.get('stock_id')
     broker_input = request.args.get('broker')
@@ -306,7 +308,13 @@ def get_broker_data():
         return jsonify({"error": f"請求失敗: {str(e)}"}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
-
-# 在文件底部添加以下代碼以安裝所需的庫
-# pip install yfinance
+    try:
+        from waitress import serve
+        serve(app, host='0.0.0.0', port=5000)
+    except ImportError:
+        print("錯誤：無法導入 waitress 模組。請確保它已經安裝。")
+        print("嘗試使用 Flask 的開發伺服器運行...")
+        app.run(host='0.0.0.0', port=5000)
+    except Exception as e:
+        print(f"啟動伺服器時發生錯誤：{e}")
+        sys.exit(1)

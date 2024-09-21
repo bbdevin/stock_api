@@ -170,8 +170,17 @@ def get_stock_history(stock_code):
         end_date = datetime.now()
         start_date = end_date - timedelta(days=365 * 10)  # 獲取10年的資料
 
-        # 為台灣股票添加 .TW 後綴
-        ticker = yf.Ticker(f"{stock_code}.TW")
+        # 檢查股票是否為上櫃股票
+        stock_info = all_companies[all_companies['公司代號'] == stock_code]
+        is_otc = stock_info['上市櫃'].iloc[0] == '上櫃' if not stock_info.empty else False
+
+        if is_otc:
+            # 對於上櫃股票，使用 .TWO 後綴
+            ticker = yf.Ticker(f"{stock_code}.TWO")
+        else:
+            # 對於上市股票，使用 .TW 後綴
+            ticker = yf.Ticker(f"{stock_code}.TW")
+
         history = ticker.history(start=start_date, end=end_date)
 
         if history.empty:
@@ -194,7 +203,6 @@ def get_stock_history(stock_code):
     except Exception as e:
         logging.error(f"獲取股票 {stock_code} 歷史資料時發生錯誤: {str(e)}", exc_info=True)
         return jsonify({'error': f"獲取股票歷史資料時發生錯誤: {str(e)}"}), 500
-
 @app.route('/api/broker_data', methods=['GET'])
 def get_broker_data():
     stock_id = request.args.get('stock_id')

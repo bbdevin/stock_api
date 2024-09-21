@@ -3,18 +3,16 @@ version: '3'
 services:
   stock-api:
     build: .
+    networks:
+      system_network:
+        ipv4_address: 172.20.0.5
     ports:
-      - "127.0.0.1:5000:5000"
+      - "172.20.0.5:5000:5000"
     volumes:
       - ./上市公司.csv:/app/上市公司.csv
       - ./上櫃公司.csv:/app/上櫃公司.csv
       - ./brokers.json:/app/brokers.json
-    networks:
-      - web
-      - internal
 
 networks:
-  web:
+  system_network:
     external: true
-  internal:
-    internal: true
